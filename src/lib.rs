@@ -3,22 +3,27 @@
 #![no_std]
 //extern crate core;
 extern crate collections;
+pub mod coordinates;
 use core::cmp::{max, min};
 use core::f32::NAN;
 use collections::vec::Vec;
+use coordinates::{Coord2D, Pixel16};
 
 fn minf(a: f32, b: f32) -> f32 {
     assert!(a != NAN && b != NAN);
     if a < b { a } else { b }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Pixel16 {
-    pub x: u16,
-    pub y: u16,
+fn maxf(a: f32, b: f32) -> f32 {
+    assert!(a != NAN && b != NAN);
+    if a > b { a } else { b }
 }
 
 /// Represents a 2D AABB.
+/// It will store nothing but the minimum and maximum of all "inserted" data points.
+/// You can `insert` discrete Pixel coordinates, which can make the aabb bigger.
+/// Or use `fit_in_aabb` to map continuous `Coord2D` into the aabb,
+/// which scales and moves your data points.
 #[derive(Clone, Copy)]
 pub struct AABB {
     pub min: Pixel16,
@@ -40,37 +45,37 @@ impl AABB {
         };
     }
 
-    pub fn fit_in_aabb(&mut self, data: &[Pixel16]) -> Vec<Pixel16> {
-        let mut scaled: Vec<Pixel16> = Vec::new();
+    pub fn fit_in_aabb(&mut self, data: &[Coord2D]) -> Vec<Coord2D> {
+        let mut scaled: Vec<Coord2D> = Vec::new();
         let dx = self.max.x - self.min.x;
         let dy = self.max.y - self.min.y;
-        let mut max_x = 0;
-        let mut max_y = 0;
-        let mut min_x = 0;
-        let mut min_y = 0;
+        let mut max_x: f32 = 0.0;
+        let mut max_y: f32 = 0.0;
+        let mut min_x: f32 = 0.0;
+        let mut min_y: f32 = 0.0;
         for pos in data {
             // search extrema
-            max_x = max(max_x, pos.x);
-            max_y = max(max_y, pos.y);
-            min_x = min(min_x, pos.x);
-            min_y = min(min_y, pos.y);
+            max_x = maxf(max_x, pos.x);
+            max_y = maxf(max_y, pos.y);
+            min_x = minf(min_x, pos.x);
+            min_y = minf(min_y, pos.y);
         }
         // calc scale factor
-        let x_factor: f32 = dx as f32 / (max_x - min_x) as f32;
-        let y_factor: f32 = dy as f32 / (max_y - min_y) as f32;
+        let x_factor: f32 = dx as f32 / (max_x - min_x);
+        let y_factor: f32 = dy as f32 / (max_y - min_y);
         let factor = minf(x_factor, y_factor);
         // calc offset
-        let x_offset: i32 = self.min.x as i32 - min_x as i32;
-        let y_offset: i32 = self.min.y as i32 - min_y as i32;
+        let x_offset: f32 = self.min.x as f32 - min_x;
+        let y_offset: f32 = self.min.y as f32 - min_y;
         for pos in data {
             // scale points
-            let mut p = Pixel16 {
-                x: (pos.x.clone() as f32 * factor) as u16,
-                y: (pos.y.clone() as f32 * factor) as u16,
+            let mut p = Coord2D {
+                x: pos.x * factor,
+                y: pos.y * factor,
             };
             // move points
-            p.x = (p.x as i32 + x_offset) as u16;
-            p.y = (p.y as i32 + y_offset) as u16;
+            p.x = p.x + x_offset;
+            p.y = p.y + y_offset;
             scaled.push(p);
         }
         scaled
@@ -82,71 +87,72 @@ pub struct Renderer<F: FnMut(u16, u16, u32)> {
 }
 
 impl<F: FnMut(u16, u16, u32)> Renderer<F> {
-    pub fn draw_lines(&mut self, aabb: AABB, data: Vec<Pixel16>) -> () {
+    pub fn draw_lines(&mut self, aabb: AABB, data: Vec<Coord2D>) -> () {
         for i in 0..data.len() - 1 {
             self.draw_line(aabb, data[i], data[i + 1], 0xFAFAFAFA);
         }
     }
 
-    //pub fn draw_rectangles(&self, aabb: AABB, data: Vec<Pixel16>, line_thickness: u16) -> () {
-    //    /// Draws a rectangle on screen.
-    //    unimplemented!();
-    //}
-
-    fn draw_line(&mut self, aabb: AABB, a: Pixel16, b: Pixel16, color: u32) {
-        let dx: u16;
-        let dy: u16;
-        if b.x >= a.x {
-            dx = b.x - a.x;
+    fn draw_line(&mut self, aabb: AABB, p1: Coord2D, p2: Coord2D, color: u32) {
+        let dx: f32;
+        let dy: f32;
+        let left;
+        let right;
+        if p1.x == minf(p1.x, p2.x) {
+            left = p1;
+            right = p2;
         } else {
-            dx = a.x - b.x;
+            left = p2;
+            right = p1;
         }
-        if b.y >= a.y {
-            dy = b.y - a.y;
+        dx = right.x - left.x;
+        if right.y >= left.y {
+            dy = right.y - left.y;
         } else {
-            dy = a.y - b.y;
+            dy = left.y - right.y;
         }
-        let gradient: f32 = dy as f32 / dx as f32;
-        let line_func = |x: f32| gradient * x + a.y as f32;
+        let gradient: f32 = dy / dx;
         if gradient <= 1.0 && gradient >= -1.0 {
-            for x in a.x..a.x + dx + 1 {
+            let line_func = |x: f32| gradient * x + left.y;
+            for x in aabb.min.x..aabb.max.x + 1 {
                 let y: f32 = line_func(x as f32);
-                let y_decimal: f32 = y - a.y as f32;
+                let y_decimal: f32 = y - left.y;
                 let intensity_low = 1.0 - y_decimal;
                 let intensity_high = y_decimal;
 
                 let pixa = (x, (y - 1.0) as u16, (intensity_low * color as f32) as u32);
                 let pixb = (x, y as u16, (intensity_high * color as f32) as u32);
-                if true ||
-                   pixa.0 >= aabb.min.x && pixa.0 <= aabb.max.x && pixa.1 >= aabb.min.y &&
-                   pixa.1 <= aabb.max.y {
-                    (self.pixel_col_fn)(pixa.0, pixa.1, pixa.2);
-                }
-                if true ||
-                   pixb.0 >= aabb.min.x && pixb.0 <= aabb.max.x && pixb.1 >= aabb.min.y &&
-                   pixb.1 <= aabb.max.y {
-                    (self.pixel_col_fn)(pixb.0, pixb.1, pixb.2);
-                }
+                //if true ||
+                //   pixa.0 >= aabb.min.x && pixa.0 <= aabb.max.x && pixa.1 >= aabb.min.y &&
+                //   pixa.1 <= aabb.max.y {
+                (self.pixel_col_fn)(pixa.0, pixa.1, pixa.2);
+                //}
+                //if true ||
+                //   pixb.0 >= aabb.min.x && pixb.0 <= aabb.max.x && pixb.1 >= aabb.min.y &&
+                //   pixb.1 <= aabb.max.y {
+                (self.pixel_col_fn)(pixb.0, pixb.1, pixb.2);
+                //}
                 //(self.pixel_col_fn)(x, (y - 1.0) as u16, (intensity_low * color as f32) as u32);
                 //(self.pixel_col_fn)(x, y as u16, (intensity_high * color as f32) as u32);
             }
         } else {
             // basically, turn around axis
-            for y in a.y..dy + 1 {
+            let line_func = |y: f32| (y - left.y) / gradient;
+            for y in aabb.min.y..aabb.max.y + 1 {
                 let x: f32 = line_func(y as f32);
-                let x_decimal: f32 = x - a.x as f32;
+                let x_decimal: f32 = x - left.x as f32;
                 let intensity_low = 1.0 - x_decimal;
                 let intensity_high = x_decimal;
                 let pixa = ((x - 1.0) as u16, y, (intensity_low * color as f32) as u32);
                 let pixb = (x as u16, y, (intensity_high * color as f32) as u32);
-                if pixa.0 >= aabb.min.x && pixa.0 <= aabb.max.x && pixa.1 >= aabb.min.y &&
-                   pixa.1 <= aabb.max.y {
-                    (self.pixel_col_fn)(pixa.0, pixa.1, pixa.2);
-                }
-                if pixb.0 >= aabb.min.x && pixb.0 <= aabb.max.x && pixb.1 >= aabb.min.y &&
-                   pixb.1 <= aabb.max.y {
-                    (self.pixel_col_fn)(pixb.0, pixb.1, pixb.2);
-                }
+                //if pixa.0 >= aabb.min.x && pixa.0 <= aabb.max.x && pixa.1 >= aabb.min.y &&
+                //   pixa.1 <= aabb.max.y {
+                (self.pixel_col_fn)(pixa.0, pixa.1, pixa.2);
+                //}
+                //if pixb.0 >= aabb.min.x && pixb.0 <= aabb.max.x && pixb.1 >= aabb.min.y &&
+                //   pixb.1 <= aabb.max.y {
+                (self.pixel_col_fn)(pixb.0, pixb.1, pixb.2);
+                //}
             }
         }
     }
