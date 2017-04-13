@@ -1,8 +1,12 @@
-#![feature(alloc,collections)]
-//#![feature(use_extern_macros)]
-#![no_std]
-//extern crate core;
-#[macro_use]
+#![feature(alloc,collections)] // needed for xargo
+#![feature(use_extern_macros)] // allows vec! etc
+#![no_std] // do not make this depending on stdlib because xargo.
+#![allow(unused_features)]
+//#![allow(unused_features)]
+//#![allow(unused_imports)]
+//#[macro_use]
+
+//extern crate core; // use for printf on local machine, disable for xargo
 extern crate collections;
 pub mod coordinates;
 use core::cmp::{max, min};
@@ -94,11 +98,11 @@ impl AABB {
     }
 }
 
-pub struct Renderer<F: FnMut(u16, u16, u32)> {
+pub struct Renderer<F: FnMut(u16, u16, f32)> {
     pub pixel_col_fn: F,
 }
 
-impl<F: FnMut(u16, u16, u32)> Renderer<F> {
+impl<F: FnMut(u16, u16, f32)> Renderer<F> {
     pub fn draw_lines(&mut self, aabb: AABB, data: Vec<Coord2D>) -> () {
         for i in 0..data.len() - 1 {
             self.draw_line(data[i], data[i + 1], 0xFAFAFAFA);
@@ -155,8 +159,8 @@ impl<F: FnMut(u16, u16, u32)> Renderer<F> {
                 let intensity_low = 1.0 - y_decimal;
                 let intensity_high = y_decimal;
                 //println!("y:{}", y_even);
-                let pixa = (x, (y - 1.0) as u16, (intensity_low * color as f32) as u32);
-                let pixb = (x, y as u16, (intensity_high * color as f32) as u32);
+                let pixa = (x, (y - 1.0) as u16, intensity_low);
+                let pixb = (x, y as u16, intensity_high);
                 //assert!(pixa.0 < 480);
                 //assert!(pixb.0 < 480);
                 //assert!(pixa.0 >= 0);
@@ -189,8 +193,8 @@ impl<F: FnMut(u16, u16, u32)> Renderer<F> {
                 assert!(x_decimal <= 1.0 && x_decimal >= -1.0);
                 let intensity_low = 1.0 - x_decimal;
                 let intensity_high = x_decimal;
-                let pixa = ((x - 1.0) as u16, y, (intensity_low * color as f32) as u32);
-                let pixb = (x as u16, y, (intensity_high * color as f32) as u32);
+                let pixa = ((x - 1.0) as u16, y, intensity_low);
+                let pixb = (x as u16, y, intensity_high);
                 //assert!(pixa.0 < 480);
                 //assert!(pixb.0 < 480);
                 //assert!(pixa.0 >= 0);
